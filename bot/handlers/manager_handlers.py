@@ -9,6 +9,7 @@ from states import ManagerStates
 from config import ADMIN_ID
 from instructions import EMPLOYEE_INSTRUCTIONS
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+from validators import MAX_TASK_TITLE_LENGTH, MAX_TASK_DESC_LENGTH
 
 router = Router()
 
@@ -299,6 +300,9 @@ async def select_employee_to_assign_task(callback_query: CallbackQuery, state: F
 @router.message(ManagerStates.waiting_for_task_title)
 async def process_task_title(message: Message, state: FSMContext):
     task_title = message.text
+    if len(task_title) > MAX_TASK_TITLE_LENGTH:
+        await message.answer(f"Название задачи слишком длинное. Пожалуйста, используйте название не длиннее {MAX_TASK_TITLE_LENGTH} символов.")
+        return
     await state.update_data(task_title=task_title)
     await message.answer("Теперь введите описание задачи:",
                          reply_markup=get_keyboard_with_back_button([]))
@@ -308,6 +312,9 @@ async def process_task_title(message: Message, state: FSMContext):
 @router.message(ManagerStates.waiting_for_task_description)
 async def process_task_description(message: Message, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
     task_description = message.text
+    if len(task_description) > MAX_TASK_DESC_LENGTH:
+        await message.answer(f"Описание задачи слишком длинное. Пожалуйста, используйте описание не длиннее {MAX_TASK_DESC_LENGTH} символов.")
+        return
     data = await state.get_data()
     assigned_employee_id = data.get('assigned_employee_id')
     task_title = data.get('task_title')

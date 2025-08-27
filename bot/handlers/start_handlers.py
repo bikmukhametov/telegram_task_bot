@@ -8,11 +8,14 @@ import logging
 from keyboards import get_start_keyboard, get_main_menu_keyboard, get_keyboard_with_back_button
 from states import RegistrationStates
 from config import ADMIN_ID
+from validators import MAX_NAME_LENGTH
 
 router = Router()
 
 app_logger = logging.getLogger('app')
 user_logger = logging.getLogger('user_actions')
+
+
 
 @router.message(F.text == "Назад")
 async def cmd_back(message: Message, state: FSMContext, pool: asyncpg.Pool):
@@ -46,6 +49,12 @@ async def cmd_cancel_action(callback_query: CallbackQuery, state: FSMContext, po
 async def cmd_start(message: Message, state: FSMContext, pool: asyncpg.Pool):
     await state.clear()
     user_id = message.from_user.id
+    user_name = message.from_user.full_name
+
+    if len(user_name) > MAX_NAME_LENGTH:
+        await message.answer("Имя слишком длинное. Пожалуйста, используйте имя не длиннее 50 символов.")
+        return
+
     async with pool.acquire() as conn:
         user = await conn.fetchrow('SELECT * FROM users WHERE user_id = $1', user_id)
         if user:
@@ -68,6 +77,10 @@ async def register_user_prompt(message: Message, state: FSMContext):
 async def process_full_name(message: Message, state: FSMContext, pool: asyncpg.Pool):
     full_name = message.text
     user_id = message.from_user.id
+
+    if len(full_name) > MAX_NAME_LENGTH:
+        await message.answer("ФИО слишком длинное. Пожалуйста, введите ФИО не длиннее 50 символов.")
+        return
 
     async with pool.acquire() as conn:
         try:

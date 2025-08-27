@@ -11,6 +11,7 @@ from keyboards import (get_main_menu_keyboard, get_confirm_delete_org_keyboard,
 from states import AdminStates
 from config import ADMIN_ID
 from instructions import MANAGER_INSTRUCTIONS
+from validators import MAX_ORG_NAME_LENGTH, MAX_BROADCAST_MESSAGE_LENGTH
 
 router = Router()
 
@@ -47,6 +48,7 @@ async def create_organization_prompt(message: Message, state: FSMContext, pool: 
         await message.answer("У вас нет прав для выполнения этой команды.")
         app_logger.warning(f"Пользователь {message.from_user.id} попытался создать организацию без прав администратора")
         return
+
     await message.answer("Введите название новой организации:",
                          reply_markup=get_keyboard_with_back_button([]))
     await state.set_state(AdminStates.waiting_for_org_name_to_create)
@@ -56,6 +58,9 @@ async def create_organization_prompt(message: Message, state: FSMContext, pool: 
 async def process_create_organization(message: Message, state: FSMContext, pool: asyncpg.Pool):
     org_name = message.text
     admin_id = message.from_user.id
+    if len(org_name) > MAX_ORG_NAME_LENGTH:
+        await message.answer(f"Название организации слишком длинное. Пожалуйста, используйте название не длиннее {MAX_ORG_NAME_LENGTH} символов.")
+        return
     async with pool.acquire() as conn:
         try:
             await conn.execute('INSERT INTO organizations (name) VALUES ($1)', org_name)
@@ -470,6 +475,9 @@ async def broadcast_message_prompt(message: Message, state: FSMContext, pool: as
 @router.message(AdminStates.waiting_for_broadcast_message)
 async def process_broadcast_message(message: Message, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
     broadcast_text = message.text
+    if len(broadcast_text) > MAX_BROADCAST_MESSAGE_LENGTH:
+        await message.answer(f"Сообщение слишком длинное. Пожалуйста, используйте сообщение не длиннее {MAX_BROADCAST_MESSAGE_LENGTH} символов.")
+        return
     admin_id = message.from_user.id
 
     async with pool.acquire() as conn:
