@@ -10,7 +10,8 @@ def get_main_menu_keyboard(role: str):
             [KeyboardButton(text="Создать организацию"), KeyboardButton(text="Удалить организацию")],
             [KeyboardButton(text="Назначить менеджера"), KeyboardButton(text="Удалить менеджера")],
             [KeyboardButton(text="Просмотр организаций"), KeyboardButton(text="Просмотр пользователей")],
-            [KeyboardButton(text="Статистика")]
+            [KeyboardButton(text="Статистика"), KeyboardButton(text="Сбросить все данные")],
+            [KeyboardButton(text="Отправить всем сообщение")]
         ]
     elif role == 'manager':
         keyboard_layout = [
@@ -106,5 +107,12 @@ def get_organizations_for_assign_manager_keyboard(organizations) -> InlineKeyboa
     keyboard = []
     for org in organizations:
         keyboard.append([InlineKeyboardButton(text=f"{org['name']} (ID: {org['org_id']})", callback_data=f"select_org_assign_manager_{org['org_id']}")])
-    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_action")]) # Universal back button
+    keyboard.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="cancel_action")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_confirm_reset_keyboard():
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Да, сбросить", callback_data="confirm_reset"),
+         InlineKeyboardButton(text="Отмена", callback_data="cancel_reset")]
+    ], row_width=2)
+    return keyboard

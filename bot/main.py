@@ -10,6 +10,10 @@ from aiogram.client.default import DefaultBotProperties
 from config import BOT_TOKEN
 from db import create_db_pool, init_db
 from handlers import start_handlers, admin_handlers, manager_handlers, employee_handlers
+from keyboards import get_main_menu_keyboard
+
+app_logger = logging.getLogger('app')
+user_logger = logging.getLogger('user_actions')
 
 def setup_logging():
     if not os.path.exists('logs'):
@@ -45,6 +49,25 @@ def setup_logging():
 
     return logger, user_logger
 
+async def on_startup_notify(bot: Bot, pool):
+    app_logger.info("Отправка уведомлений об обновлении пользователям...")
+    async with pool.acquire() as conn:
+        users = await conn.fetch('SELECT user_id, role, full_name FROM users')
+        for user in users:
+            try:
+                keyboard = get_main_menu_keyboard(user['role'])
+                await bot.send_message(
+                    user['user_id'],
+                    "Возникли временные технические неполадки в работе нашего Telegram-бота. " +
+                    "Сейчас все проблемы устранены, и он снова полностью функционирует. " +
+                    "Приносим извинения за доставленные неудобства!",
+                    reply_markup=keyboard
+                )
+                user_logger.info(f"Пользователю {user['user_id']} ({user['full_name']}) отправлено обновленное меню.")
+            except Exception as e:
+                app_logger.error(f"Не удалось отправить сообщение пользователю {user['user_id']}: {e}")
+    app_logger.info("Отправка уведомлений завершена.")
+
 async def main():
     app_logger, user_logger = setup_logging()
 
@@ -69,6 +92,7 @@ async def main():
     dp.shutdown.register(on_shutdown)
 
     try:
+        await on_startup_notify(bot, pool)
         await bot.delete_webhook(drop_pending_updates=True)
         app_logger.info("Бот запущен")
         await dp.start_polling(bot)

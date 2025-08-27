@@ -44,6 +44,7 @@ async def cmd_cancel_action(callback_query: CallbackQuery, state: FSMContext, po
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, pool: asyncpg.Pool):
+    await state.clear()
     user_id = message.from_user.id
     async with pool.acquire() as conn:
         user = await conn.fetchrow('SELECT * FROM users WHERE user_id = $1', user_id)

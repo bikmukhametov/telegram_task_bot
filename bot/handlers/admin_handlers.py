@@ -4,7 +4,10 @@ from aiogram.fsm.context import FSMContext
 import asyncpg
 import logging
 
-from keyboards import get_main_menu_keyboard, get_confirm_delete_org_keyboard, get_confirm_assign_manager_keyboard, get_keyboard_with_back_button, get_users_for_assign_manager_keyboard, get_managers_for_remove_keyboard, get_organizations_for_assign_manager_keyboard
+from keyboards import (get_main_menu_keyboard, get_confirm_delete_org_keyboard, 
+                     get_confirm_assign_manager_keyboard, get_keyboard_with_back_button, 
+                     get_users_for_assign_manager_keyboard, get_managers_for_remove_keyboard, 
+                     get_organizations_for_assign_manager_keyboard, get_confirm_reset_keyboard)
 from states import AdminStates
 from config import ADMIN_ID
 from instructions import MANAGER_INSTRUCTIONS
@@ -405,3 +408,89 @@ async def select_manager_to_remove(callback_query: CallbackQuery, state: FSMCont
             await state.clear()
             app_logger.warning(f"Пользователь {user_id} не найден или не является менеджером при удалении")
     await callback_query.answer()
+
+@router.message(F.text == "Сбросить все данные")
+async def reset_all_users_prompt(message: Message, state: FSMContext, pool: asyncpg.Pool):
+    if not await is_admin(message.from_user.id, pool):
+        await message.answer("У вас нет прав для выполнения этой команды.")
+        return
+    
+    await message.answer(
+        "Вы уверены, что хотите сбросить всех пользователей? "
+        "Это действие удалит все данные о пользователях (кроме администраторов), "
+        "их роли, задачи и сообщения. Пользователям нужно будет заново пройти регистрацию.",
+        reply_markup=get_confirm_reset_keyboard()
+    )
+    await state.set_state(AdminStates.waiting_for_reset_confirmation)
+
+@router.callback_query(F.data == "confirm_reset", AdminStates.waiting_for_reset_confirmation)
+async def confirm_reset_all_users(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
+    admin_id = callback_query.from_user.id
+    
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            users_to_reset = await conn.fetch("SELECT user_id FROM users WHERE role != 'admin'")
+            
+            for user in users_to_reset:
+                user_id = user['user_id']
+                try:
+                    await bot.send_message(user_id, "Ваш аккаунт был сброшен администратором. "
+                                                    "Для продолжения использования бота, пожалуйста, "
+                                                    "нажмите на кнопку /start. 👈")
+                except Exception as e:
+                    app_logger.warning(f"Не удалось отправить сообщение о сбросе пользователю {user_id}: {e}")
+
+            await conn.execute("DELETE FROM tasks")
+            await conn.execute("DELETE FROM users WHERE role != 'admin'")
+            await conn.execute("DELETE FROM organizations")
+
+    await callback_query.message.edit_text("Все пользователи были сброшены.", reply_markup=None)
+    await callback_query.message.answer("Главное меню:", reply_markup=get_main_menu_keyboard('admin'))
+    user_logger.info(f"Администратор {admin_id} сбросил всех пользователей.")
+    await state.clear()
+    await callback_query.answer()
+
+@router.callback_query(F.data == "cancel_reset", AdminStates.waiting_for_reset_confirmation)
+async def cancel_reset_all_users(callback_query: CallbackQuery, state: FSMContext):
+    await callback_query.message.edit_text("Сброс пользователей отменен.", reply_markup=None)
+    await callback_query.message.answer("Главное меню:", reply_markup=get_main_menu_keyboard('admin'))
+    await state.clear()
+    await callback_query.answer()
+
+@router.message(F.text == "Отправить всем сообщение")
+async def broadcast_message_prompt(message: Message, state: FSMContext, pool: asyncpg.Pool):
+    if not await is_admin(message.from_user.id, pool):
+        await message.answer("У вас нет прав для выполнения этой команды.")
+        return
+    
+    await message.answer("Введите сообщение, которое хотите отправить всем пользователям:",
+                         reply_markup=get_keyboard_with_back_button([]))
+    await state.set_state(AdminStates.waiting_for_broadcast_message)
+
+@router.message(AdminStates.waiting_for_broadcast_message)
+async def process_broadcast_message(message: Message, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
+    broadcast_text = message.text
+    admin_id = message.from_user.id
+
+    async with pool.acquire() as conn:
+        users = await conn.fetch("SELECT user_id FROM users WHERE user_id != $1", admin_id)
+    
+    sent_count = 0
+    failed_count = 0
+    
+    for user in users:
+        try:
+            await bot.send_message(user['user_id'], broadcast_text)
+            sent_count += 1
+        except Exception as e:
+            failed_count += 1
+            app_logger.error(f"Не удалось отправить сообщение пользователю {user['user_id']}: {e}")
+
+    await message.answer(
+        f"Рассылка завершена.\n"
+        f"Успешно отправлено: {sent_count}\n"
+        f"Не удалось отправить: {failed_count}",
+        reply_markup=get_main_menu_keyboard('admin')
+    )
+    user_logger.info(f"Администратор {admin_id} отправил сообщение '{broadcast_text}' {sent_count} пользователям.")
+    await state.clear()

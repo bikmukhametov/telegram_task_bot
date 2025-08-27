@@ -9,6 +9,9 @@ class AdminStates(StatesGroup):
     waiting_for_manager_id = State()
     waiting_for_manager_org_id = State()
     waiting_for_manager_id_to_remove = State()
+    waiting_for_reset_confirmation = State()
+    waiting_for_broadcast_message = State()
+
 
 class ManagerStates(StatesGroup):
     waiting_for_employee_id = State()
