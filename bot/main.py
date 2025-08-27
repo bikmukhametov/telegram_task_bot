@@ -50,7 +50,7 @@ def setup_logging():
     return logger, user_logger
 
 async def on_startup_notify(bot: Bot, pool):
-    app_logger.info("Отправка уведомлений об обновлении пользователям...")
+    app_logger.info("Отправка уведомлений пользователям об возобновлении работы бота...")
     async with pool.acquire() as conn:
         users = await conn.fetch('SELECT user_id, role, full_name FROM users')
         for user in users:
@@ -68,6 +68,20 @@ async def on_startup_notify(bot: Bot, pool):
                 app_logger.error(f"Не удалось отправить сообщение пользователю {user['user_id']}: {e}")
     app_logger.info("Отправка уведомлений завершена.")
 
+async def on_shutdown_notify(bot: Bot, pool):
+    app_logger.info("Отправка уведомлений пользователям о выключении бота...")
+    async with pool.acquire() as conn:
+        users = await conn.fetch('SELECT user_id FROM users')
+        for user in users:
+            try:
+                await bot.send_message(
+                    user['user_id'],
+                    "Бот временно остановлен на техническое обслуживание. Мы скоро вернемся!"
+                )
+            except Exception as e:
+                app_logger.error(f"Не удалось отправить сообщение о выключении пользователю {user['user_id']}: {e}")
+    app_logger.info("Отправка уведомлений о выключении завершена.")
+
 async def main():
     app_logger, user_logger = setup_logging()
 
@@ -84,8 +98,9 @@ async def main():
 
     dp['pool'] = pool
 
-    async def on_shutdown(bot: Bot):
+    async def on_shutdown(bot: Bot, pool: asyncpg.Pool):
         app_logger.info("Бот останавливается...")
+        await on_shutdown_notify(bot, pool)
         await pool.close()
         app_logger.info("Пул подключений к БД закрыт")
 
