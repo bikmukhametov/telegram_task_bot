@@ -17,7 +17,7 @@ user_logger = logging.getLogger('user_actions')
 async def get_tasks_by_status(employee_id: int, pool: asyncpg.Pool, status: str = None):
     async with pool.acquire() as conn:
         if status:
-            if status in ['completed', 'rejected']: # Apply limit only for these statuses
+            if status in ['completed', 'rejected']:
                 tasks = await conn.fetch('''
                     SELECT t.task_id, t.title, t.description, t.status, u.full_name as manager_name
                     FROM tasks t
@@ -26,7 +26,7 @@ async def get_tasks_by_status(employee_id: int, pool: asyncpg.Pool, status: str 
                     ORDER BY t.created_at DESC
                     LIMIT 20
                 ''', employee_id, status)
-            else: # No limit for other statuses
+            else:
                 tasks = await conn.fetch('''
                     SELECT t.task_id, t.title, t.description, t.status, u.full_name as manager_name
                     FROM tasks t
@@ -34,7 +34,7 @@ async def get_tasks_by_status(employee_id: int, pool: asyncpg.Pool, status: str 
                     WHERE t.employee_id = $1 AND t.status = $2
                     ORDER BY t.created_at DESC
                 ''', employee_id, status)
-        else: # No limit for 'all' tasks
+        else:
             tasks = await conn.fetch('''
                 SELECT t.task_id, t.title, t.description, t.status, u.full_name as manager_name
                 FROM tasks t
@@ -124,40 +124,36 @@ async def view_my_rejected_tasks(message: Message, pool: asyncpg.Pool):
 @router.callback_query(F.data.startswith("change_task_direct_"))
 async def direct_change_task_status(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
     await callback_query.answer()
-    await state.clear() # Clear state at the beginning of direct task change flow
+    await state.clear()
 
     task_id_from_callback = int(callback_query.data.split('_')[3])
     employee_id = callback_query.from_user.id
 
     async with pool.acquire() as conn:
-        # Fetch the specific task and ensure it's still eligible
         task = await conn.fetchrow('SELECT task_id, title, description, status, manager_id, employee_id FROM tasks WHERE task_id = $1 AND employee_id = $2 AND status IN ($3, $4)',
                                    task_id_from_callback, employee_id, 'new', 'accepted')
 
         if not task:
             await callback_query.message.edit_text("Этой задачи больше нет или ее статус уже изменен.", reply_markup=None)
-            await state.set_state(None) # Ensure state is clear
+            await state.set_state(None)
             app_logger.warning(f"Сотрудник {employee_id} попытался изменить статус несуществующей задачи {task_id_from_callback}")
             return
 
-        # Store only the task_id (primitive) for processing. Full details will be re-fetched by _process_next_employee_task
         await state.update_data(tasks_to_process=[task['task_id']], current_task_index=0,
                                 current_task_id=task['task_id'], # Still store for immediate use
                                 manager_id_for_notification=task['manager_id'],
                                 task_title=task['title'],
                                 task_description=task['description'])
 
-        # Display the task and ask for status change
         await _process_next_employee_task(callback_query.message.chat.id, state, pool, bot, message_id_to_delete=callback_query.message.message_id)
         user_logger.info(f"Сотрудник {employee_id} начал изменение статуса задачи {task_id_from_callback} через прямое уведомление")
 
 @router.message(F.text == "Изменить статус задач")
 async def change_task_status_prompt(message: Message, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
-    await state.clear() # Clear state at the beginning of sequential task change flow
+    await state.clear()
 
     employee_id = message.from_user.id
     async with pool.acquire() as conn:
-        # Fetch all eligible tasks for sequential processing
         tasks = await conn.fetch('SELECT task_id, title, description, status, manager_id, employee_id FROM tasks WHERE employee_id = $1 AND status IN ($2, $3) ORDER BY created_at ASC',
                                  employee_id, 'new', 'accepted')
 
@@ -167,7 +163,6 @@ async def change_task_status_prompt(message: Message, state: FSMContext, pool: a
         user_logger.info(f"Сотрудник {employee_id} попытался изменить статус задач (нет задач для изменения)")
         return
 
-    # Store only task_ids (primitive) for processing
     await state.update_data(tasks_to_process=[t['task_id'] for t in tasks], current_task_index=0)
     user_logger.info(f"Сотрудник {employee_id} начал изменение статуса {len(tasks)} задач через меню")
     await _process_next_employee_task(message.chat.id, state, pool, bot)
@@ -176,7 +171,6 @@ async def change_task_status_prompt(message: Message, state: FSMContext, pool: a
 async def cancel_task_status_change(callback_query: CallbackQuery, state: FSMContext):
     await callback_query.answer()
     await state.clear()
-    # Edit the message to remove buttons and indicate cancellation
     await callback_query.message.edit_text("Изменение статуса задач отменено. Возвращаюсь в главное меню.",
                                            reply_markup=None)
     await callback_query.message.answer("Главное меню:",
@@ -188,22 +182,14 @@ async def cancel_task_status_change(callback_query: CallbackQuery, state: FSMCon
 async def set_task_status(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
     await callback_query.answer()
     new_status = callback_query.data.split('_')[1]
-    task_id_from_callback = int(callback_query.data.split('_')[2]) # Extract task_id directly from callback data
+    task_id_from_callback = int(callback_query.data.split('_')[2])
 
     data = await state.get_data()
     tasks_to_process = data.get('tasks_to_process', [])
     current_task_index = data.get('current_task_index', 0)
-    # current_task_id = data.get('current_task_id') # No longer strictly needed from state for the current task
-    # last_sent_task_message_id = data.get('last_sent_task_message_id') # No longer strictly needed from state
 
-    current_task_id = task_id_from_callback # Always use task_id from callback
-    target_message_id = callback_query.message.message_id # Always use message_id from callback
-
-    # If current_task_id is not in state, it means it's a direct notification flow
-    # or the state was somehow corrupted. Handle gracefully.
-    # This block can be removed as current_task_id is now always from callback
-    # if not current_task_id and tasks_to_process:
-    #     current_task_id = tasks_to_process[current_task_index] # Assuming it's a task_id primitive
+    current_task_id = task_id_from_callback
+    target_message_id = callback_query.message.message_id
 
     if not current_task_id:
         try:
@@ -215,10 +201,9 @@ async def set_task_status(callback_query: CallbackQuery, state: FSMContext, pool
         app_logger.error(f"Ошибка при изменении статуса задачи: не удалось определить текущую задачу для сотрудника {callback_query.from_user.id}")
         return
 
-    employee_id = callback_query.from_user.id # Define employee_id here
+    employee_id = callback_query.from_user.id
 
     async with pool.acquire() as conn:
-        # Idempotency check: Get current status from DB
         current_db_task = await conn.fetchrow('SELECT status, title, description, manager_id FROM tasks WHERE task_id = $1', current_task_id)
 
         if not current_db_task:
@@ -274,18 +259,13 @@ async def set_task_status(callback_query: CallbackQuery, state: FSMContext, pool
                 )
                 await send_task_notification(bot, manager_id_for_notification, notification_text, parse_mode='HTML')
                 user_logger.info(f"Отправлено уведомление менеджеру {manager_id_for_notification} об изменении статуса задачи {current_task_id}")
-
-    # Edit the message that was displayed to the user
     try:
         await bot.edit_message_text(edit_text_message,
                                     chat_id=callback_query.message.chat.id, message_id=target_message_id, reply_markup=None, parse_mode='HTML')
     except Exception as e:
         app_logger.error(f"Ошибка при редактировании сообщения для сотрудника {employee_id}: {e}")
 
-    # After processing, decide if we need to proceed to the next task or clear state
-    # Only proceed to the next task if the processed task was the 'current' one in the sequence
     if tasks_to_process and current_task_id == tasks_to_process[current_task_index] and len(tasks_to_process) > current_task_index + 1:
-        # Advance the index for the next task in sequence
         await state.update_data(current_task_index=current_task_index + 1)
         await _process_next_employee_task(callback_query.message.chat.id, state, pool, bot, current_task_index + 1)
     else:
@@ -299,12 +279,9 @@ async def _process_next_employee_task(chat_id: int, state: FSMContext, pool: asy
     
     for i in range(start_index, len(tasks_to_process)):
         task_id = tasks_to_process[i]
-        
-        # Add a small delay to mitigate potential race conditions with DB writes
         await asyncio.sleep(0.1) 
 
         async with pool.acquire() as conn:
-            # Re-fetch task from DB to get its current status, always for robustness
             db_task = await conn.fetchrow('''
                 SELECT t.task_id, t.title, t.description, t.status, t.manager_id, t.employee_id, u.full_name as manager_name
                 FROM tasks t
@@ -313,7 +290,6 @@ async def _process_next_employee_task(chat_id: int, state: FSMContext, pool: asy
             ''',
                                           task_id)
             
-            # Ensure the task still belongs to the employee and is eligible
             if db_task and db_task['employee_id'] == chat_id and db_task['status'] in ['new', 'accepted']:
                 next_task = db_task
                 await state.update_data(current_task_index=i,
@@ -348,31 +324,27 @@ async def _process_next_employee_task(chat_id: int, state: FSMContext, pool: asy
         )
         await state.set_state(EmployeeStates.waiting_for_task_to_change_status)
         
-        if len(tasks_to_process) == 1 and start_index == 0: # Direct notification flow
+        if len(tasks_to_process) == 1 and start_index == 0:
             sent_message = await bot.send_message(chat_id, task_info_message, reply_markup=get_task_status_keyboard(next_task['task_id'], include_back=False), parse_mode='HTML')
-            # Store the ID of the new message so set_task_status can edit it
             await state.update_data(last_sent_task_message_id=sent_message.message_id)
 
-            # Attempt to delete the original notification message if provided
             if message_id_to_delete:
                 try:
                     await bot.delete_message(chat_id, message_id_to_delete)
                 except Exception as e:
                     app_logger.error(f"Ошибка при удалении сообщения для сотрудника {chat_id}: {e}")
-        else: # Sequential flow (from "Изменить статус задач" button)
+        else:
             sent_message = await bot.send_message(chat_id, task_info_message, reply_markup=get_task_status_keyboard(next_task['task_id'], include_back=True), parse_mode='HTML')
-            # Store the ID of the new message so set_task_status can edit it
             await state.update_data(last_sent_task_message_id=sent_message.message_id)
-    else: # No next_task found
+    else:
         await state.clear()
-        if len(tasks_to_process) > 1: # Only for sequential flow (more than one task)
+        if len(tasks_to_process) > 1:
             await bot.send_message(chat_id, "✅ Все новые и принятые задачи обработаны.",
                                          reply_markup=get_main_menu_keyboard('employee'))
             user_logger.info(f"Сотрудник {chat_id} завершил изменение статуса всех задач")
 
 @router.message(EmployeeStates.waiting_for_task_to_change_status)
 async def process_task_for_status_change(message: Message, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
-    # This handler is largely superseded by callback queries but kept for robustness
     await message.answer("Пожалуйста, используйте кнопки для изменения статуса.",
                          reply_markup=get_main_menu_keyboard('employee'))
     await state.clear()

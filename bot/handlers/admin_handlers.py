@@ -1,4 +1,4 @@
-from aiogram import Router, F, Bot # Import Bot
+from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 import asyncpg
@@ -7,7 +7,7 @@ import logging
 from keyboards import get_main_menu_keyboard, get_confirm_delete_org_keyboard, get_confirm_assign_manager_keyboard, get_keyboard_with_back_button, get_users_for_assign_manager_keyboard, get_managers_for_remove_keyboard, get_organizations_for_assign_manager_keyboard
 from states import AdminStates
 from config import ADMIN_ID
-from instructions import MANAGER_INSTRUCTIONS # Import instructions
+from instructions import MANAGER_INSTRUCTIONS
 
 router = Router()
 
@@ -45,7 +45,7 @@ async def create_organization_prompt(message: Message, state: FSMContext, pool: 
         app_logger.warning(f"Пользователь {message.from_user.id} попытался создать организацию без прав администратора")
         return
     await message.answer("Введите название новой организации:",
-                         reply_markup=get_keyboard_with_back_button([])) # Add back button
+                         reply_markup=get_keyboard_with_back_button([]))
     await state.set_state(AdminStates.waiting_for_org_name_to_create)
     user_logger.info(f"Администратор {message.from_user.id} начал создание организации")
 
@@ -82,7 +82,7 @@ async def delete_organization_prompt(message: Message, state: FSMContext, pool: 
             response = "Выберите организацию для удаления (введите ID):\n"
             for org in organizations:
                 response += f"- ID: {org['org_id']}, Название: {org['name']}\n"
-            await message.answer(response, reply_markup=get_keyboard_with_back_button([])) # Add back button
+            await message.answer(response, reply_markup=get_keyboard_with_back_button([]))
             await state.set_state(AdminStates.waiting_for_org_name_to_delete)
             user_logger.info(f"Администратор {message.from_user.id} начал удаление организации")
         else:
@@ -108,7 +108,7 @@ async def process_delete_organization(message: Message, state: FSMContext, pool:
             user_logger.info(f"Администратор {message.from_user.id} подтверждает удаление организации {org_id} ({org['name']})")
         else:
             await message.answer("Организация с таким ID не найдена. Пожалуйста, введите корректный ID.",
-                                 reply_markup=get_keyboard_with_back_button([])) # Add back button
+                                 reply_markup=get_keyboard_with_back_button([]))
             app_logger.warning(f"Организация с ID {org_id} не найдена при удалении")
 
 
@@ -118,14 +118,12 @@ async def confirm_delete_organization(callback_query: CallbackQuery, pool: async
     admin_id = callback_query.from_user.id
     async with pool.acquire() as conn:
         async with conn.transaction():
-            # Reset roles and organization for users of the deleted organization
             await conn.execute('''
                 UPDATE users
                 SET role = 'user', organization_id = NULL
                 WHERE organization_id = $1 AND role IN ('employee', 'manager')
             ''', org_id)
 
-            # Delete the organization
             org_name = await conn.fetchval('SELECT name FROM organizations WHERE org_id = $1', org_id)
             await conn.execute('DELETE FROM organizations WHERE org_id = $1', org_id)
 
@@ -151,11 +149,11 @@ async def assign_manager_prompt(message: Message, state: FSMContext, pool: async
         return
 
     async with pool.acquire() as conn:
-        users = await conn.fetch('SELECT user_id, full_name, role FROM users WHERE role = $1', 'user') # Only users with 'user' role
+        users = await conn.fetch('SELECT user_id, full_name, role FROM users WHERE role = $1', 'user')
         if users:
             await message.answer("Выберите пользователя, которого хотите назначить менеджером:",
                                  reply_markup=get_users_for_assign_manager_keyboard(users))
-            await state.set_state(AdminStates.waiting_for_manager_id) # Keep state for the next step of selection
+            await state.set_state(AdminStates.waiting_for_manager_id)
             user_logger.info(f"Администратор {message.from_user.id} начал назначение менеджера")
         else:
             await message.answer("Нет доступных пользователей для назначения менеджером.",
@@ -165,7 +163,7 @@ async def assign_manager_prompt(message: Message, state: FSMContext, pool: async
 @router.callback_query(F.data.startswith("select_user_assign_manager_"))
 async def select_user_to_assign_manager(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool):
     user_id = int(callback_query.data.split('_')[4])
-    await callback_query.message.edit_reply_markup(reply_markup=None) # Remove inline keyboard
+    await callback_query.message.edit_reply_markup(reply_markup=None)
 
     async with pool.acquire() as conn:
         user = await conn.fetchrow('SELECT full_name, role FROM users WHERE user_id = $1', user_id)
@@ -189,9 +187,8 @@ async def select_user_to_assign_manager(callback_query: CallbackQuery, state: FS
             app_logger.warning(f"Пользователь {user_id} не найден при назначении менеджера")
     await callback_query.answer()
 
-# New handler for selecting organization via inline button
 @router.callback_query(F.data.startswith("select_org_assign_manager_"))
-async def process_assign_manager_by_button(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot): # Added bot: Bot
+async def process_assign_manager_by_button(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
     await callback_query.answer()
     org_id = int(callback_query.data.split('_')[4])
     admin_id = callback_query.from_user.id
@@ -218,7 +215,6 @@ async def process_assign_manager_by_button(callback_query: CallbackQuery, state:
             await state.clear()
             user_logger.info(f"Администратор {admin_id} назначил пользователя {manager_user_id} менеджером организации {org_id} ({org['name']})")
 
-            # Send notification to the new manager
             try:
                 await bot.send_message(manager_user_id, MANAGER_INSTRUCTIONS, parse_mode='HTML')
                 await bot.send_message(manager_user_id, "Ваше главное меню:", reply_markup=get_main_menu_keyboard('manager'))
@@ -240,18 +236,15 @@ async def view_statistics(message: Message, pool: asyncpg.Pool):
         return
 
     async with pool.acquire() as conn:
-        # No prints in this function
         total_users = await conn.fetchval('SELECT COUNT(*) FROM users')
         total_organizations = await conn.fetchval('SELECT COUNT(*) FROM organizations')
         total_tasks = await conn.fetchval('SELECT COUNT(*) FROM tasks')
         
-        # New: Count of managers and employees
         total_managers = await conn.fetchval('SELECT COUNT(*) FROM users WHERE role = $1', 'manager')
         total_employees = await conn.fetchval('SELECT COUNT(*) FROM users WHERE role = $1', 'employee')
 
         tasks_by_status = await conn.fetch('SELECT status, COUNT(*) FROM tasks GROUP BY status')
 
-        # New: Tasks per organization
         tasks_per_organization = await conn.fetch('''
             SELECT o.name, COUNT(t.task_id) as task_count
             FROM organizations o
@@ -260,7 +253,6 @@ async def view_statistics(message: Message, pool: asyncpg.Pool):
             ORDER BY o.name
         ''')
 
-        # New: Tasks assigned by each manager
         tasks_by_manager = await conn.fetch('''
             SELECT u.full_name, COUNT(t.task_id) as assigned_tasks_count
             FROM users u
@@ -270,7 +262,6 @@ async def view_statistics(message: Message, pool: asyncpg.Pool):
             ORDER BY u.full_name
         ''')
 
-        # New: Tasks completed by each employee
         tasks_completed_by_employee = await conn.fetch('''
             SELECT u.full_name, COUNT(t.task_id) as completed_tasks_count
             FROM users u
@@ -309,7 +300,6 @@ async def view_statistics(message: Message, pool: asyncpg.Pool):
             emoji = status_emojis.get(status_key, '')
             stats_text += f"{emoji} {display_status}: {count}\n"
 
-        # Add new statistics
         stats_text += f"\n<b>Роли пользователей:</b>\n"
         stats_text += f"🧑‍💻 Всего менеджеров: {total_managers}\n"
         stats_text += f"👨‍🏭 Всего сотрудников: {total_employees}\n"
@@ -383,16 +373,16 @@ async def remove_manager_prompt(message: Message, state: FSMContext, pool: async
         if managers:
             await message.answer("Выберите менеджера, которого хотите удалить:",
                                  reply_markup=get_managers_for_remove_keyboard(managers))
-            await state.set_state(AdminStates.waiting_for_manager_id_to_remove) # Use new state
+            await state.set_state(AdminStates.waiting_for_manager_id_to_remove)
             user_logger.info(f"Администратор {message.from_user.id} начал удаление менеджера")
         else:
             await message.answer("Нет менеджеров для удаления.", reply_markup=get_main_menu_keyboard('admin'))
             user_logger.info(f"Администратор {message.from_user.id} попытался удалить менеджера (нет менеджеров)")
 
 @router.callback_query(F.data.startswith("select_manager_remove_"))
-async def select_manager_to_remove(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot): # Added bot: Bot
+async def select_manager_to_remove(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
     user_id = int(callback_query.data.split('_')[3])
-    await callback_query.message.edit_reply_markup(reply_markup=None) # Remove inline keyboard
+    await callback_query.message.edit_reply_markup(reply_markup=None)
 
     async with pool.acquire() as conn:
         manager = await conn.fetchrow('SELECT full_name FROM users WHERE user_id = $1 AND role = $2', user_id, 'manager')
@@ -402,7 +392,7 @@ async def select_manager_to_remove(callback_query: CallbackQuery, state: FSMCont
                                                  reply_markup=get_main_menu_keyboard('admin'), parse_mode='HTML')
             await state.clear()
             user_logger.info(f"Администратор {callback_query.from_user.id} удалил менеджера {user_id} ({manager['full_name']})")
-            # Send notification to the user whose role was changed
+            
             try:
                 await bot.send_message(user_id, f"<b>Уведомление:</b> Ваша роль была изменена на <b>Пользователь</b>. Вы больше не являетесь менеджером.", parse_mode='HTML')
                 await bot.send_message(user_id, "Ваше главное меню:", reply_markup=get_main_menu_keyboard('user'))

@@ -13,7 +13,7 @@ async def create_db_pool():
             host=DB_HOST,
             database=DB_NAME
         )
-        app_logger.info("Пу подключений к базе данных создан успешно")
+        app_logger.info("Пул подключений к базе данных создан успешно")
         return pool
     except Exception as e:
         app_logger.error(f"Ошибка при создании пула подключений к базе данных: {e}")

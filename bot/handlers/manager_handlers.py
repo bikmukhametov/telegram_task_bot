@@ -6,8 +6,8 @@ import logging
 
 from keyboards import get_main_menu_keyboard, get_confirm_assign_employee_keyboard, get_keyboard_with_back_button, get_users_for_assign_employee_keyboard, get_employees_for_remove_keyboard, get_employees_for_assign_task_keyboard
 from states import ManagerStates
-from config import ADMIN_ID # Used for is_admin, though not strictly manager-specific
-from instructions import EMPLOYEE_INSTRUCTIONS # Import instructions
+from config import ADMIN_ID
+from instructions import EMPLOYEE_INSTRUCTIONS
 from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
 
 router = Router()
@@ -151,7 +151,7 @@ async def assign_employee_prompt(message: Message, state: FSMContext, pool: asyn
 @router.callback_query(F.data.startswith("select_user_assign_employee_"))
 async def select_user_to_assign_employee(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
     user_id = int(callback_query.data.split('_')[4])
-    await callback_query.message.edit_reply_markup(reply_markup=None) # Remove inline keyboard
+    await callback_query.message.edit_reply_markup(reply_markup=None)
 
     async with pool.acquire() as conn:
         user = await conn.fetchrow('SELECT full_name, role FROM users WHERE user_id = $1', user_id)
@@ -168,7 +168,6 @@ async def select_user_to_assign_employee(callback_query: CallbackQuery, state: F
                 await state.clear()
                 user_logger.info(f"Менеджер {manager_id} назначил пользователя {user_id} ({user['full_name']}) сотрудником")
 
-                # Send notification to the new employee
                 try:
                     await bot.send_message(user_id, EMPLOYEE_INSTRUCTIONS, parse_mode='HTML')
                     await bot.send_message(user_id, "Ваше главное меню:", reply_markup=get_main_menu_keyboard('employee'))
@@ -219,9 +218,9 @@ async def remove_employee_prompt(message: Message, state: FSMContext, pool: asyn
             user_logger.info(f"Менеджер {manager_id} попытался удалить сотрудника (нет сотрудников)")
 
 @router.callback_query(F.data.startswith("select_employee_remove_"))
-async def select_employee_to_remove(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot): # Added bot: Bot
+async def select_employee_to_remove(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, bot: Bot):
     user_id = int(callback_query.data.split('_')[3])
-    await callback_query.message.edit_reply_markup(reply_markup=None) # Remove inline keyboard
+    await callback_query.message.edit_reply_markup(reply_markup=None)
 
     async with pool.acquire() as conn:
         employee = await conn.fetchrow('SELECT full_name FROM users WHERE user_id = $1 AND role = $2', user_id, 'employee')
@@ -232,7 +231,7 @@ async def select_employee_to_remove(callback_query: CallbackQuery, state: FSMCon
                                                  reply_markup=get_main_menu_keyboard('manager'), parse_mode='HTML')
             await state.clear()
             user_logger.info(f"Менеджер {callback_query.from_user.id} удалил сотрудника {user_id} ({employee['full_name']})")
-            # Send notification to the user whose role was changed
+
             try:
                 await bot.send_message(user_id, f"<b>Уведомление:</b> Ваша роль была изменена на <b>Пользователь</b>. Вы больше не являетесь сотрудником.", parse_mode='HTML')
                 await bot.send_message(user_id, "Ваше главное меню:", reply_markup=get_main_menu_keyboard('user'))
@@ -279,8 +278,8 @@ async def assign_task_prompt(message: Message, state: FSMContext, pool: asyncpg.
 
 @router.callback_query(F.data.startswith("select_employee_assign_task_"))
 async def select_employee_to_assign_task(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool):
-    employee_id = int(callback_query.data.split('_')[4]) # Corrected index
-    await callback_query.message.edit_reply_markup(reply_markup=None) # Remove inline keyboard
+    employee_id = int(callback_query.data.split('_')[4])
+    await callback_query.message.edit_reply_markup(reply_markup=None)
 
     async with pool.acquire() as conn:
         employee = await conn.fetchrow('SELECT full_name FROM users WHERE user_id = $1 AND role = $2', employee_id, 'employee')
@@ -322,7 +321,6 @@ async def process_task_description(message: Message, state: FSMContext, pool: as
         return
 
     async with pool.acquire() as conn:
-        # Fetch manager's organization_id
         manager_org_id = await conn.fetchval('SELECT organization_id FROM users WHERE user_id = $1', manager_id)
         if not manager_org_id:
             await message.answer("Ошибка: Вы не привязаны ни к одной организации. Невозможно создать задачу.",
@@ -345,7 +343,6 @@ async def process_task_description(message: Message, state: FSMContext, pool: as
             await state.clear()
             user_logger.info(f"Менеджер {manager_id} создал задачу {new_task_id} для сотрудника {assigned_employee_id}")
 
-            # Send notification to the assigned employee
             notification_text = (
                 f"🔔 <b>Новая задача назначена!</b>\n\n"
                 f"<b>Название:</b> {task_title}\n"

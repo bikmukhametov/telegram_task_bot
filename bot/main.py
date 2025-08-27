@@ -11,17 +11,13 @@ from config import BOT_TOKEN
 from db import create_db_pool, init_db
 from handlers import start_handlers, admin_handlers, manager_handlers, employee_handlers
 
-# Настройка логирования
 def setup_logging():
-    # Создаем папку logs, если ее нет
     if not os.path.exists('logs'):
         os.makedirs('logs')
 
-    # Логгер для приложения
     logger = logging.getLogger('app')
     logger.setLevel(logging.INFO)
 
-    # Логгер для действий пользователей
     user_logger = logging.getLogger('user_actions')
     user_logger.setLevel(logging.INFO)
 
@@ -50,26 +46,21 @@ def setup_logging():
     return logger, user_logger
 
 async def main():
-    # Настраиваем логирование
     app_logger, user_logger = setup_logging()
 
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Register routers
     dp.include_router(start_handlers.router)
     dp.include_router(admin_handlers.router)
     dp.include_router(manager_handlers.router)
     dp.include_router(employee_handlers.router)
 
-    # Create database pool
     pool = await create_db_pool()
     await init_db(pool)
 
-    # Pass the pool to handlers
     dp['pool'] = pool
 
-    # Graceful shutdown
     async def on_shutdown(bot: Bot):
         app_logger.info("Бот останавливается...")
         await pool.close()

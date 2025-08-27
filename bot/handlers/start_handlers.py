@@ -14,11 +14,10 @@ router = Router()
 app_logger = logging.getLogger('app')
 user_logger = logging.getLogger('user_actions')
 
-# Universal back button handler
 @router.message(F.text == "Назад")
 async def cmd_back(message: Message, state: FSMContext, pool: asyncpg.Pool):
     current_state = await state.get_state()
-    if current_state: # Only clear if there's an active state
+    if current_state:
         await state.clear()
     user_id = message.from_user.id
     async with pool.acquire() as conn:
@@ -31,14 +30,14 @@ async def cmd_back(message: Message, state: FSMContext, pool: asyncpg.Pool):
 @router.callback_query(F.data == "cancel_action")
 async def cmd_cancel_action(callback_query: CallbackQuery, state: FSMContext, pool: asyncpg.Pool):
     current_state = await state.get_state()
-    if current_state: # Only clear if there's an active state
+    if current_state:
         await state.clear()
     user_id = callback_query.from_user.id
     async with pool.acquire() as conn:
         user = await conn.fetchrow('SELECT role FROM users WHERE user_id = $1', user_id)
         user_role = user['role'] if user else 'user'
         await callback_query.message.edit_text("Действие отменено. Вы вернулись в главное меню.",
-                                               reply_markup=None) # Remove inline keyboard
+                                               reply_markup=None)
         await callback_query.message.answer("Главное меню:", reply_markup=get_main_menu_keyboard(user_role))
         user_logger.info(f"Пользователь {user_id} отменил действие через callback, текущая роль: {user_role}")
     await callback_query.answer()
@@ -60,7 +59,7 @@ async def cmd_start(message: Message, state: FSMContext, pool: asyncpg.Pool):
 @router.message(F.text == "Зарегистрироваться")
 async def register_user_prompt(message: Message, state: FSMContext):
     await message.answer("Пожалуйста, введите ваше полное ФИО:",
-                         reply_markup=get_keyboard_with_back_button([])) # Add back button
+                         reply_markup=get_keyboard_with_back_button([]))
     await state.set_state(RegistrationStates.waiting_for_full_name)
     user_logger.info(f"Пользователь {message.from_user.id} начал регистрацию")
 
@@ -71,7 +70,6 @@ async def process_full_name(message: Message, state: FSMContext, pool: asyncpg.P
 
     async with pool.acquire() as conn:
         try:
-            # Check if it's the admin registering
             if user_id == ADMIN_ID:
                 await conn.execute('INSERT INTO users (user_id, full_name, role) VALUES ($1, $2, $3)',
                                    user_id, full_name, 'admin')

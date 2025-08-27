@@ -41,7 +41,6 @@ def get_task_status_keyboard(task_id: int, include_back: bool = False) -> Inline
         buttons.append([InlineKeyboardButton(text="Назад", callback_data="cancel_task_status_change")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# New function for keyboards with a "Назад" button
 def get_keyboard_with_back_button(current_keyboard_layout: list[list[KeyboardButton]]):
     keyboard_layout = current_keyboard_layout + [[KeyboardButton(text="Назад")]]
     return ReplyKeyboardMarkup(keyboard=keyboard_layout, resize_keyboard=True)
